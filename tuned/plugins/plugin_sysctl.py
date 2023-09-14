@@ -158,7 +158,16 @@ def _apply_sysctl_config_line(path, lineno, line, instance_sysctl):
 	_write_sysctl(option, value, ignore_missing = True)
 
 def _get_sysctl_path(option):
-	return "/proc/sys/%s" % option.replace(".", "/")
+	"""The sysctl name in sysctl tool and in /proc/sys differs.
+	All dots (.) in sysctl name are represented by /proc/sys
+	directories and all slashes in the name (/) are converted
+	to dots (.) in the /proc/sys filenames."""
+
+	# This requires a three-way replace, because the dot (.) and slash (/)
+	# must be switched. The assumption is that the backslash (\) will never
+	# be present in the name and the replace code uses it to mark dots
+	# that are to be replaced by slash.
+	return "/proc/sys/%s" % option.replace(".", "\\.").replace("/", ".").replace("\\.", "/")
 
 def _read_sysctl(option):
 	path = _get_sysctl_path(option)
