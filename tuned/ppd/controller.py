@@ -1,6 +1,6 @@
 from tuned import exports, logs
 from tuned.utils.commands import commands
-from tuned.consts import PPD_CONFIG_FILE
+from tuned.consts import PPD_CONFIG_FILE, PPD_BASE_PROFILE_FILE
 from tuned.ppd.config import PPDConfig, PPD_PERFORMANCE, PPD_POWER_SAVER
 from enum import StrEnum
 import threading
@@ -109,8 +109,7 @@ class Controller(exports.interfaces.ExportableInterface):
         properties = dbus.Interface(self.proxy, dbus.PROPERTIES_IFACE)
         self._on_battery = bool(properties.Get(UPOWER_DBUS_INTERFACE, "OnBattery"))
         log.info("Battery status: " + ("DC (battery)" if self._on_battery else "AC (charging)"))
-        tuned_profile = self._config.ppd_to_tuned_battery[self._base_profile] if self._on_battery else self._config.ppd_to_tuned[self._base_profile]
-        self._tuned_interface.switch_profile(tuned_profile)
+        self.switch_profile(self._active_profile)
 
     def setup_battery_signaling(self):
         try:
@@ -132,14 +131,23 @@ class Controller(exports.interfaces.ExportableInterface):
             self._performance_degraded = performance_degraded
             exports.property_changed("PerformanceDegraded", performance_degraded)
 
+    def _load_base_profile(self):
+        self._base_profile = self._cmd.read_file(PPD_BASE_PROFILE_FILE, no_error=True).strip() or None
+
+    def _save_base_profile(self):
+        self._cmd.write_to_file(PPD_BASE_PROFILE_FILE, self._base_profile + "\n")
+
     def initialize(self):
+        self._active_profile = None
+        self._on_battery = False
         self._profile_holds = ProfileHoldManager(self)
         self._performance_degraded = PerformanceDegraded.NONE
         self._config = PPDConfig(PPD_CONFIG_FILE)
-        active_profile = self.active_profile()
-        self._base_profile = active_profile if active_profile != UNKNOWN_PROFILE else self._config.default_profile
+        self._load_base_profile()
+        if self._base_profile is None:
+            self._base_profile = self._config.default_profile
+            self._save_base_profile()
         self.switch_profile(self._base_profile)
-        self._on_battery = False
         if self._config.battery_detection:
             self.setup_battery_signaling()
 
@@ -155,22 +163,59 @@ class Controller(exports.interfaces.ExportableInterface):
 
     @property
     def base_profile(self):
+        """
+        The profile that should be restored when all profile
+        holds are released or when tuned-ppd is restarted.
+        This property is only changed by `set_active_profile`
+        and its current value is always stored in PPD_BASE_PROFILE_FILE.
+        """
         return self._base_profile
+
+    @property
+    def active_profile(self):
+        """
+        The currently active profile. Equal to `base_profile` when
+        there are no active profile holds.
+        """
+        return self._active_profile
 
     def terminate(self):
         self._terminate.set()
 
-    def switch_profile(self, profile):
-        if self.active_profile() == profile:
+    def _set_tuned_profile(self, tuned_profile):
+        """
+        Changes the TuneD profile to `tuned_profile` if not already active.
+        """
+        active_tuned_profile = self._tuned_interface.active_profile()
+        if active_tuned_profile == tuned_profile:
             return
-        tuned_profile = self._config.ppd_to_tuned_battery[profile] if self._on_battery else self._config.ppd_to_tuned[profile]
-        log.info("Switching to profile '%s'" % tuned_profile)
+        log.info("Setting TuneD profile to '%s'" % tuned_profile)
         self._tuned_interface.switch_profile(tuned_profile)
-        exports.property_changed("ActiveProfile", profile)
 
-    def active_profile(self):
-        tuned_profile = self._tuned_interface.active_profile()
-        return self._config.tuned_to_ppd.get(tuned_profile, UNKNOWN_PROFILE)
+    def switch_profile(self, profile):
+        """
+        Changes the currently active profile to `profile`.
+        This does not change the base profile.
+        """
+        self._set_tuned_profile(self._config.ppd_to_tuned.get(profile, self._on_battery))
+        if self._active_profile != profile:
+            exports.property_changed("ActiveProfile", profile)
+            self._active_profile = profile
+
+    def _check_active_profile(self, err_ret=UNKNOWN_PROFILE):
+        """
+        Checks that the profile in `active_profile` is actually set
+        (i.e., the corresponding TuneD profile is active) and if yes,
+        returns it. Otherwise warns of a discrepancy and returns `err_ret`.
+        """
+        active_tuned_profile = self._tuned_interface.active_profile()
+        expected_tuned_profile = self._config.ppd_to_tuned.get(self._active_profile, self._on_battery)
+        if active_tuned_profile != expected_tuned_profile:
+            log.warning("Active profile check failed. The active PPD profile is '%s' and the expected TuneD profile was '%s'. "
+                        "The active TuneD profile ('%s') was likely set by a different program."
+                        % (self._active_profile, expected_tuned_profile, active_tuned_profile))
+            return err_ret
+        return self._active_profile
 
     @exports.export("sss", "u")
     def HoldProfile(self, profile, reason, app_id, caller):
@@ -192,16 +237,24 @@ class Controller(exports.interfaces.ExportableInterface):
 
     @exports.property_setter("ActiveProfile")
     def set_active_profile(self, profile):
-        if profile not in self._config.ppd_to_tuned:
+        """
+        Sets both the active profile and the base profile, releasing
+        all active holds.
+        """
+        if profile not in self._config.ppd_to_tuned.keys():
             raise dbus.exceptions.DBusException("Invalid profile '%s'" % profile)
         log.debug("Setting base profile to %s" % profile)
         self._base_profile = profile
+        self._save_base_profile()
         self._profile_holds.clear()
         self.switch_profile(profile)
 
     @exports.property_getter("ActiveProfile")
     def get_active_profile(self):
-        return self.active_profile()
+        """
+        Returns the currently active profile.
+        """
+        return self._check_active_profile()
 
     @exports.property_getter("Profiles")
     def get_profiles(self):
