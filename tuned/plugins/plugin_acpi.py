@@ -16,7 +16,7 @@ class ACPIPlugin(base.Plugin):
 	[option]`platform_profile`, which sets the ACPI
 	platform profile sysfs attribute,
 	a generic power/performance preference API for other drivers.
-	Multiple profiles can be specified, separated by `|`.
+	Multiple profiles can be specified, separated by '|'.
 	The first available profile is selected.
 
 	.Selecting a platform profile
@@ -26,8 +26,11 @@ class ACPIPlugin(base.Plugin):
 	platform_profile=balanced|low-power
 	----
 	Using this option, *TuneD* will try to set the platform profile
-	to `balanced`. If that fails, it will try to set it to `low-power`.
+	to "balanced". If that fails, it will try to set it to "low-power".
 	====
+
+	More information about the Platform Profile API can be found in its
+	https://docs.kernel.org/userspace-api/sysfs-platform_profile.html[kernel documentation].
 	"""
 	def __init__(self, *args, **kwargs):
 		super(ACPIPlugin, self).__init__(*args, **kwargs)
