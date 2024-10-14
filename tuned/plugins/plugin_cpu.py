@@ -17,17 +17,39 @@ cpuidle_states_path = "/sys/devices/system/cpu/cpu0/cpuidle"
 
 class CPULatencyPlugin(hotplug.Plugin):
 	"""
-	Sets the CPU governor to the value specified by the [option]`governor`
-	option and dynamically changes the Power Management Quality of
-	Service (PM QoS) CPU Direct Memory Access (DMA) latency according
-	to the CPU load.
+	A plug-in for tuning various CPU options, including CPU governor,
+	Energy Performance Bias, latency, and P-state settings.
+
+	When dynamic tuning is enabled, the plug-in periodically adjusts
+	the Power Management Quality of Service (PM QoS) CPU Direct Memory
+	Access (DMA) latency according to current CPU load.
+
+	Some options of the CPU plugin can be applied to individual CPUs.
+	The list of CPUs can be specified either as a comma-separated list
+	of their names or using the **cpulist** syntax.
+
+	.Restricting CPU plug-in options to specific CPUs
+	====
+	The two examples below are equivalent, both will set the
+	governor to `powersave` for CPUs 0, 2, and 3.
+	----
+	[cpu]
+	governor=powersave
+	devices=cpu0,cpu2,cpu3
+	----
+	----
+	[cpu]
+	governor=powersave
+	devices=cpulist:0,2-3
+	----
+	====
 	
+	The following options are available for the plug-in:
+
 	`governor`:::
-	The [option]`governor` option of the 'cpu' plug-in supports specifying
-	CPU governors. Multiple governors are separated using '|'. The '|'
-	character is meant to represent a logical 'or' operator. Note that the
-	same syntax is used for the [option]`energy_perf_bias` option. *TuneD*
-	will set the first governor that is available on the system.
+	The [option]`governor` option supports specifying CPU governors.
+	Multiple governors can be specified, separated using `|`.
+	*TuneD* will set the first governor that is available on the system.
 	+
 	.Specifying a CPU governor
 	====
@@ -35,10 +57,9 @@ class CPULatencyPlugin(hotplug.Plugin):
 	[cpu]
 	governor=ondemand|powersave
 	----
-
-	*TuneD* will set the 'ondemand'
-	governor, if it is available. If it is not available, but the 'powersave'
-	governor is available, 'powersave' will be set. If neither of them are
+	*TuneD* will set the `ondemand`
+	governor, if it is available. If it is not available, but the `powersave`
+	governor is available, `powersave` will be set. If neither of them are
 	available, the governor will not be changed.
 	====
 	
@@ -46,8 +67,9 @@ class CPULatencyPlugin(hotplug.Plugin):
 	The sampling rate determines how frequently the governor checks
 	to tune the CPU. The [option]`sampling_down_factor` is a tunable
 	that multiplies the sampling rate when the CPU is at its highest
-	clock frequency thereby delaying load evaluation and improving
-	performance. Allowed values for sampling_down_factor are 1 to 100000.
+	clock frequency, thereby delaying load evaluation and improving
+	performance. The allowed values for [option]`sampling_down_factor`
+	are 1 to 100000.
 	+
 	.The recommended setting for jitter reduction
 	====
@@ -58,14 +80,26 @@ class CPULatencyPlugin(hotplug.Plugin):
 	====
 	
 	`energy_perf_bias`:::
-	[option]`energy_perf_bias` supports managing energy
-	vs. performance policy via x86 Model Specific Registers using the
-	`x86_energy_perf_policy` tool. Multiple alternative Energy Performance
-	Bias (EPB) values are supported. The alternative values are separated
-	using the '|' character. The following EPB values are supported
-	starting with kernel 4.13: "performance", "balance-performance",
-	"normal", "balance-power" and "power". On newer processors is value
-	writen straight to file (see rhbz#2095829)
+	The [option]`energy_perf_bias` option is used to manage the value of
+	the Energy Performance Bias (EPB) hint, which specifies preferences
+	with respect to power-performance tradeoffs. **TuneD** sets the hint
+	either via x86 Model Specific Registers using the `x86_energy_perf_policy`
+	command-line tool, or directly via the appropriate sysfs knob
+	(depending on whether the CPU also supports [option]`energy_performance_preference`).
+	+
+	Multiple alternative EPB values can be specified, separated using the `|` character.
+	The following values are supported starting with kernel 4.13:
+	+
+	--
+	* `performance`,
+	* `balance-performance`,
+	* `normal`,
+	* `balance-power`,
+	* `power`.
+	--
+	+
+	For more information about EPB, refer to its
+	https://docs.kernel.org/admin-guide/pm/intel_epb.html[kernel documentation].
 	+
 	.Specifying alternative Energy Performance Bias values
 	====
@@ -73,58 +107,69 @@ class CPULatencyPlugin(hotplug.Plugin):
 	[cpu]
 	energy_perf_bias=powersave|power
 	----
-	
-	*TuneD* will try to set EPB to 'powersave'. If that fails, it will
-	try to set it to 'power'.
+	*TuneD* will try to set EPB to `powersave`. If that fails, it will
+	try to set it to `power`.
 	====
 	
 	`energy_performance_preference`:::
-	[option]`energy_performance_preference` supports managing energy
-	vs. performance hints on newer Intel and AMD processors with active P-State
-	CPU scaling drivers (intel_pstate or amd-pstate). Multiple alternative
-	Energy Performance Preferences (EPP) values are supported. The alternative
-	values are separated using the '|' character. Available values can be found
-	in `energy_performance_available_preferences` file in `CPUFreq` policy
-	directory in `sysfs`.
-	in
+	The [option]`energy_performance_preference` option supports managing energy
+	vs. performance preference using the Energy Performance Preference (EPP)
+	sysfs knob, which is present on newer Intel and AMD processors with active
+	P-State CPU scaling drivers (intel_pstate or amd-pstate).
 	+
-	.Specifying alternative Energy Performance Hints values
+	Multiple alternative EPP values can be specified, separated using the `|` character.
+	The available values can be found in the `energy_performance_available_preferences`
+	file in the
+	https://docs.kernel.org/admin-guide/pm/cpufreq.html#policy-interface-in-sysfs[CPUFreq sysfs policy directory].
+	+
+	More information about EPP can found in
+	https://docs.kernel.org/admin-guide/pm/intel_pstate.html#energy-vs-performance-hints[intel_pstate kernel docs].
+	+
+	.Specifying alternative Energy Performance Preference values
 	====
 	----
 	[cpu]
 	energy_performance_preference=balance_power|power
 	----
 	
-	*TuneD* will try to set EPP to 'balance_power'. If that fails, it will
-	try to set it to 'power'.
+	*TuneD* will try to set EPP to `balance_power`. If that fails, it will
+	try to set it to `power`.
 	====
 	
-	`latency_low, latency_high, load_threshold`:::
+	`latency_low`, `latency_high`, `load_threshold`:::
 	+
-	If the CPU load is lower than the value specified by
-	the [option]`load_threshold` option, the latency is set to the value
-	specified either by the [option]`latency_high` option or by the
-	[option]`latency_low` option.
+	These three options are taken into account only when dynamic tuning is enabled.
+	+
+	Whenever the CPU load gets lower than the value specified by the
+	[option]`load_threshold` option, the global latency limit is dynamically set to the value
+	specified by [option]`latency_high`. Whenever the load gets higher than
+	[option]`load_threshold`, the global latency limit is set to the value of [option]`latency_low`.
 
 	`force_latency`:::
-	You can also force the latency to a specific value and prevent it from
+	You can also force the global latency limit to a specific value and prevent it from
 	dynamically changing further. To do so, set the [option]`force_latency`
 	option to the required latency value.
 	+
-	The maximum latency value can be specified in several ways:
+	IMPORTANT: This option is incompatible with the options
+	[option]`latency_low`, [option]`latency_high`, and [option]`load_threshold`.
+	Using it thus automatically disables dynamic tuning.
+	+
+	IMPORTANT: When multiple instances of the `cpu` plug-in are defined, the
+	[option]`force_latency` is only taken into account as set in the first
+	instance. It concerns all CPUs, not only the ones specified by the
+	[option]`devices` setting in the plug-in instance.
+	+
+	The global latency limit can be specified in several ways:
 	+
 	--
 	* by a numerical value in microseconds (for example, `force_latency=10`)
 	* as the kernel CPU idle level ID of the maximum C-state allowed
-	  (for example, force_latency = cstate.id:1)
+	  (for example, `force_latency = cstate.id:1`)
 	* as a case sensitive name of the maximum C-state allowed
-	  (for example, force_latency = cstate.name:C1)
-	* by using 'None' as a fallback value to prevent errors when alternative
-	  C-state IDs/names do not exist. When 'None' is used in the alternatives
-	  pipeline, all the alternatives that follow 'None' are ignored.
+	  (for example, `force_latency = cstate.name:C1`)
 	--
 	+
-	It is also possible to specify multiple fallback values separated by '|' as
+	It is also possible to specify multiple alternative values separated by `|` as
 	the C-state names and/or IDs may not be available on some systems.
 	+
 	.Specifying fallback C-state values
@@ -133,28 +178,59 @@ class CPULatencyPlugin(hotplug.Plugin):
 	[cpu]
 	force_latency=cstate.name:C6|cstate.id:4|10
 	----
-	This configuration tries to obtain and set the latency of C-state named C6.
-	If the C-state C6 does not exist, kernel CPU idle level ID 4 (state4) latency
-	is searched for in sysfs. Finally, if the state4 directory in sysfs is not found,
-	the last latency fallback value is `10` us. The value is encoded and written into
+	This configuration tries to obtain and set the latency of the C-state named C6.
+	If the C-state C6 does not exist, the kernel CPU idle level ID 4 (state4) latency
+	is searched for in sysfs. Finally, if the state4 directory is not found in sysfs,
+	the last fallback latency value is 10 μs. The value is encoded and written into
 	the kernel's PM QoS file `/dev/cpu_dma_latency`.
 	====
 	+
-	.Specifying fallback C-state values using 'None'.
+	The special value `None` can be used to prevent errors when none of the previously
+	specified C-state IDs/names exist. All other alternatives that follow `None` are ignored.
+	+
+	.Specifying fallback C-state values using `None`.
 	====
 	----
 	[cpu]
 	force_latency=cstate.name:XYZ|None
 	----
-	In this case, if C-state with the name `XYZ` does not exist,
+	In this case, if the C-state with the name XYZ does not exist,
 	no latency value will be written into the
 	kernel's PM QoS file, and no errors will be reported due to the
-	presence of 'None'.
+	presence of `None`.
 	====
-	
+
+	`pm_qos_resume_latency_us`:::
+	This option allows to set specific resume latency constraints for individual CPUs.
+	The values are interpreted in microseconds.
+	+
+	IMPORTANT: Similarly to [option]`force_latency`, this option is incompatible
+	with the options  [option]`latency_low`, [option]`latency_high`,
+	and [option]`load_threshold`. Setting it will disable dynamic tuning.
+	+
+	.Configuring resume latency
+	====
+	----
+	[cpu]
+	pm_qos_resume_latency_us=0
+	----
+	Allows all C-states for all CPUs.
+	----
+	[cpu]
+	devices=cpu0
+	pm_qos_resume_latency_us=100
+	----
+	Allows only C-states with a resume latency less than 100 μs for CPU0.
+	----
+	[cpu]
+	pm_qos_resume_latency_us=n/a
+	----
+	The special value `n/a` disables C-states completely.
+	====
+
 	`min_perf_pct, max_perf_pct, no_turbo`:::
 	These options set the internals of the Intel P-State driver exposed via the kernel's
-	`sysfs` interface.
+	sysfs interface.
 	+
 	.Adjusting the configuration of the Intel P-State driver
 	====
@@ -165,32 +241,16 @@ class CPULatencyPlugin(hotplug.Plugin):
 	Limit the minimum P-State that will be requested by the driver. It states
 	it as a percentage of the max (non-turbo) performance level.
 	====
-
-	`pm_qos_resume_latency_us`:::
-	This option allow to set specific latency for all cpus or specific ones.
 	+
-	.Configuring resume latency
-	====
-	----
-	[cpu]
-	pm_qos_resume_latency_us=n/a
-	----
-	Special value that disables C-states completely.
-	----
-	[cpu]
-	pm_qos_resume_latency_us=0
-	----
-	Allows all C-states.
-	----
-	[cpu]
-	pm_qos_resume_latency_us=100
-	----
-	Allows any C-state with a resume latency less than 100.
-	====
+	For more information about these options, see
+	https://docs.kernel.org/admin-guide/pm/intel_pstate.html#global-attributes[intel_pstate kernel docs].
 
 	`boost`:::
-	The [option]`boost` option allows the CPU to boost above nominal
-	frequencies for shorts periods of time.
+	The [option]`boost` option allows AMD CPUs with active amd-pstate drivers
+	to boost above nominal frequencies for shorts periods of time.
+	+
+	More information about the option can be found in
+	https://docs.kernel.org/admin-guide/pm/amd-pstate.html#user-space-interface-in-sysfs-per-policy-control[amd_pstate kernel docs].
 	+
 	.Allowing CPU boost
 	====
