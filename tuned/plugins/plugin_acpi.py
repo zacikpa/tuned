@@ -28,6 +28,9 @@ class ACPIPlugin(base.Plugin):
 	Using this option, *TuneD* will try to set the platform profile
 	to `balanced`. If that fails, it will try to set it to `low-power`.
 	====
+
+	More information about the Platform Profile API can be found in its
+	https://docs.kernel.org/userspace-api/sysfs-platform_profile.html[kernel documentation].
 	"""
 	def __init__(self, *args, **kwargs):
 		super(ACPIPlugin, self).__init__(*args, **kwargs)
