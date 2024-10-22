@@ -28,9 +28,10 @@ class DiskPlugin(hotplug.Plugin):
 	----
 	====
 
+	`elevator`:::
 	The [option]`elevator` option sets the Linux I/O scheduler.
-
-	.Use the bfq I/O scheduler on the `xvda` block device
+	+
+	.Use the BFQ I/O scheduler on the `xvda` block device
 	====
 	----
 	[disk]
@@ -39,6 +40,7 @@ class DiskPlugin(hotplug.Plugin):
 	----
 	====
 
+	`scheduler_quantum`:::
 	The [option]`scheduler_quantum` option only applies to the CFQ I/O
 	scheduler. It defines the number of I/O requests that CFQ sends to
 	one device at one time, essentially limiting queue depth. The default
@@ -46,13 +48,14 @@ class DiskPlugin(hotplug.Plugin):
 	depth, but increasing the value of quantum will also increase latency,
 	especially for large sequential write work loads.
 
+	`apm`, `spindown`:::
 	The [option]`apm` option sets the Advanced Power Management feature
 	on drives that support it. It corresponds to using the `-B` option of
 	the `hdparm` utility. The [option]`spindown` option puts the drive
 	into idle (low-power) mode, and also sets the standby (spindown)
 	timeout for the drive. It corresponds to using `-S` option of the
 	`hdparm` utility.
-
+	+
 	.Use a medium-agressive power management with spindown
 	====
 	----
@@ -61,16 +64,20 @@ class DiskPlugin(hotplug.Plugin):
 	spindown=6
 	----
 	====
+	+
+	NOTE: The [option]`apm` and [option]`spindown` options are only
+	supported on systems that have the `hdparm` utility installed.
 
+	`readahead`, `readahead_multiply`:::
 	The [option]`readahead` option controls how much extra data the
 	operating system reads from disk when performing sequential
 	I/O operations. Increasing the `readahead` value might improve
 	performance in application environments where sequential reading of
 	large files takes place. The default unit for readahead is KiB. This
-	can be adjusted to sectors by specifying the suffix 's'. If the
+	can be adjusted to sectors by specifying the suffix `s`. If the
 	suffix is specified, there must be at least one space between the
 	number and suffix (for example, `readahead=8192 s`).
-
+	+
 	.Set the `readahead` to 4MB unless already set to a higher value
 	====
 	----
