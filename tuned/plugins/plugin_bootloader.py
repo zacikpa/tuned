@@ -14,93 +14,102 @@ log = tuned.logs.get()
 
 class BootloaderPlugin(base.Plugin):
 	"""
-	Adds options to the kernel command line. This plug-in supports the
+	Adds arguments to the kernel command line. This plug-in supports the
 	GRUB 2 boot loader and the Boot Loader Specification (BLS).
 
-	NOTE: *TuneD* will not remove or replace kernel command line
-	parameters added via other methods like *grubby*. *TuneD* will manage
-	the kernel command line parameters added via *TuneD*. Please refer
-	to your platform bootloader documentation about how to identify and
-	manage kernel command line parameters set outside of *TuneD*.
-
-	Customized non-standard location of the GRUB 2 configuration file
-	can be specified by the [option]`grub2_cfg_file` option.
-
-	The kernel options are added to the current GRUB configuration and
-	its templates. Reboot the system for the kernel option to take effect.
-
+	By default, kernel arguments are added directly to the current GRUB
+	configuration and its templates. On rpm-ostree systems, *TuneD* uses
+	the `rpm-ostree kargs` command to add new kernel arguments. In both cases,
+	a system reboot is necessary for the new kernel arguments to take effect.
 	Switching to another profile or manually stopping the `tuned`
-	service removes the additional options. If you shut down or reboot
-	the system, the kernel options persist in the [filename]`grub.cfg`
-	file and grub environment files.
+	service removes the added arguments.
 
-	The kernel options can be specified by the following syntax:
+	`grub2_cfg_file`:::
+	The standard locations of GRUB 2 configuration files are `/etc/grub2.cfg`
+	and `/etc/grub2-efi.cfg`. Custom, non-standard locations can be specified
+	using the [option]`grub2_cfg_file` option.
 
+	`cmdline`:::
+	The kernel arguments can be specified by the following syntax:
+	+
 	[subs="+quotes,+macros"]
 	----
 	cmdline__suffix__=__arg1__ __arg2__ ... __argN__
 	----
-
+	+
 	Or with an alternative, but equivalent syntax:
-
+	+
 	[subs="+quotes,+macros"]
 	----
 	cmdline__suffix__=+__arg1__ __arg2__ ... __argN__
 	----
-
-	Where __suffix__ can be arbitrary (even empty) alphanumeric
+	+
+	Here, __suffix__ can be an arbitrary (even empty) alphanumeric
 	string which should be unique across all loaded profiles. It is
 	recommended to use the profile name as the __suffix__
-	(for example, [option]`cmdline_my_profile`). If there are multiple
-	[option]`cmdline` options with the same suffix, during the profile
-	load/merge the value which was assigned previously will be used. This
-	is the same behavior as any other plug-in options. The final kernel
-	command line is constructed by concatenating all the resulting
-	[option]`cmdline` options.
-
-	It is also possible to remove kernel options by the following syntax:
-
+	(for example, [option]`cmdline_my_profile`).
+	+
+	If there are multiple
+	[option]`cmdline` options with the same suffix, the last one takes
+	precedence:
+	+
+	--
+	* In case of profile inheritance, the conflicting option is taken
+	  from the child profile.
+	* In case of a profile merge, the conflicting option is taken from the last
+	  requested profile.
+	--
+	+
+	The final kernel command line is constructed by concatenating all
+	[option]`cmdline` options. However, it is also possible to remove
+	kernel arguments added via previous `cmdline` options using the following syntax:
+	+
 	[subs="+quotes,+macros"]
 	----
 	cmdline__suffix__=-__arg1__ __arg2__ ... __argN__
 	----
-
-	Such kernel options will not be concatenated and thus removed during
-	the final kernel command line construction.
-
+	+
+	IMPORTANT: *TuneD* profiles can only be used to add _new_ kernel command line
+	arguments and remove those added by other active profiles (i.e., when
+	merging or inheriting profiles). *TuneD* will not remove or replace kernel
+	command line arguments added via other methods, like *grubby*. Please
+	refer to your platform bootloader documentation about how to identify and
+	manage kernel command line arguments set outside of *TuneD*.
+	+
 	.Modifying the kernel command line
 	====
-	For example, to add the [option]`quiet` kernel option to a *TuneD*
-	profile, include the following lines in the [filename]`tuned.conf`
-	file:
+	To add the `quiet` and `rhgb` arguments to the kernel command line, include the
+	following lines in a *TuneD* profile:
 	----
 	[bootloader]
-	cmdline_my_profile=+quiet
+	cmdline_my_profile=quiet rhgb
 	----
-	An example of a custom profile `my_profile` that adds the
-	[option]`isolcpus=2` option to the kernel command line:
-	----
-	[bootloader]
-	cmdline_my_profile=isolcpus=2
-	----
-	An example of a custom profile `my_profile` that removes the
-	[option]`rhgb quiet` options from the kernel command line (if
-	previously added by *TuneD*):
+	Kernel arguments that require values (e.g., `isolcpus`) are added the same way:
 	----
 	[bootloader]
-	cmdline_my_profile=-rhgb quiet
+	cmdline_my_profile=quiet rhgb isolcpus=2
 	----
 	====
-
-	.Modifying the kernel command line, example with inheritance
+	+
+	.Modifying the kernel command line, bad usage
 	====
-	For example, to add the [option]`rhgb quiet` kernel options to a
-	*TuneD* profile `profile_1`:
+	Attempting to remove existing kernel arguments `ro` and `console=tty1`
+	like below will not do anything:
+	----
+	[bootloader]
+	cmdline_my_profile=-ro console=tty1
+	----
+	====
+	+
+	.Modifying the kernel command line with profile inheritance
+	====
+	A parent profile `profile_1` adds `rhgb` and `quiet`
+	to the kernel command line:
 	----
 	[bootloader]
 	cmdline_profile_1=+rhgb quiet
 	----
-	In the child profile `profile_2` drop the [option]`quiet` option
+	Its child profile `profile_2` may drop the `quiet` argument
 	from the kernel command line:
 	----
 	[main]
@@ -109,8 +118,20 @@ class BootloaderPlugin(base.Plugin):
 	[bootloader]
 	cmdline_profile_2=-quiet
 	----
-	The final kernel command line will be [option]`rhgb`. In case the same
-	[option]`cmdline` suffix as in the `profile_1` is used:
+	As a result, only `rhgb` is appended to the command line.
+	====
+	+
+	.Modifying the kernel command line with profile inheritance, bad usage
+	====
+	A parent profile `profile_1` adds `rhgb` and `quiet`
+	to the kernel command line:
+	----
+	[bootloader]
+	cmdline_profile_1=+rhgb quiet
+	----
+	Its child profile `profile_2` tries to drop the `quiet` argument
+	from the kernel command line, but uses the same [option]`cmdline`
+	suffix (`profile_1`).
 	----
 	[main]
 	include=profile_1
@@ -118,34 +139,31 @@ class BootloaderPlugin(base.Plugin):
 	[bootloader]
 	cmdline_profile_1=-quiet
 	----
-	It will result in the empty kernel command line because the merge
-	executes and the [option]`cmdline_profile_1` gets redefined to just
-	[option]`-quiet`. Thus there is nothing to remove in the final kernel
-	command line processing.
+	Only the latter [option]`cmdline` option is evaluated in this
+	case, and the kernel command line remains unchanged, because
+	`quiet` was not previously added by a distinct [option]`cmdline` option.
 	====
 
-	The [option]`initrd_add_img=IMAGE` adds an initrd overlay file
-	`IMAGE`. If the `IMAGE` file name begins with '/', the absolute path is
-	used. Otherwise, the current profile directory is used as the base
-	directory for the `IMAGE`.
-
-	The [option]`initrd_add_dir=DIR` creates an initrd image from the
-	directory `DIR` and adds the resulting image as an overlay.
-	If the `DIR` directory name begins with '/', the absolute path
-	is used. Otherwise, the current profile directory is used as the
-	base directory for the `DIR`.
-
-	The [option]`initrd_dst_img=PATHNAME` sets the name and location of
+	`initrd_add_img`, `initrd_add_dir`, `initrd_dst_img`, `initrd_remove_dir`:::
+	The option [option]`initrd_add_img=IMAGE_PATH` adds an initrd overlay file
+	found at `IMAGE_PATH`. If `IMAGE_PATH` is not an absolute path, the current
+	profile directory is assumed to be the base directory for the path.
+	+
+	The option [option]`initrd_add_dir=DIR_PATH` creates an initrd image from the
+	directory found at `DIR_PATH` and adds the resulting image as an overlay.
+	If `DIR_PATH` is not an absolute path, the current profile directory is assumed
+	to be the base directory for the path.
+	+
+	The [option]`initrd_dst_img=DST_PATH` sets the name and the location of
 	the resulting initrd image. Typically, it is not necessary to use this
 	option. By default, the location of initrd images is `/boot` and the
-	name of the image is taken as the basename of `IMAGE` or `DIR`. This can
-	be overridden by setting [option]`initrd_dst_img`.
-
+	name of the image is taken as the basename of `IMAGE_PATH` or `DIR_PATH`.
+	+
 	The [option]`initrd_remove_dir=VALUE` removes the source directory
-	from which the initrd image was built if `VALUE` is true. Only 'y',
-	'yes', 't', 'true' and '1' (case insensitive) are accepted as true
+	from which the initrd image was built if `VALUE` is true. Only `y`,
+	`yes`, `t`, `true` and `1` (case insensitive) are accepted as true
 	values for this option. Other values are interpreted as false.
-
+	+
 	.Adding an overlay initrd image
 	====
 	----
@@ -157,12 +175,15 @@ class BootloaderPlugin(base.Plugin):
 	and and then removes the `tuned-initrd.img` directory from `/tmp`.
 	====
 
-	The [option]`skip_grub_config=VALUE` does not change grub
-	configuration if `VALUE` is true. However, [option]`cmdline`
-	options are still processed, and the result is used to verify the current
-	cmdline. Only 'y', 'yes', 't', 'true' and '1' (case insensitive) are accepted
-	as true values for this option. Other values are interpreted as false.
-
+	`skip_grub_config`:::
+	Setting the option [option]`skip_grub_config` to true makes *TuneD* skip
+	configuring GRUB altogether. The [option]`cmdline` options are still
+	processed, and the result is used to verify the current kernel command line
+	when running `tuned-adm verify`.
+	+
+	The values interpreted as true are `y`, `yes`, `t`, `true` and `1`
+	(case insensitive). Any other value is interpreted as false.
+	+
 	.Do not change grub configuration
 	====
 	----
@@ -170,6 +191,10 @@ class BootloaderPlugin(base.Plugin):
 	skip_grub_config=True
 	cmdline=+systemd.cpu_affinity=1
 	----
+	Applying the above profile will not modify the kernel command line.
+	However, when running `tuned-adm verify` with the profile appied,
+	*TuneD* will report an error if the `systemd.cpu_affinity` kernel
+	argument is not set to `1`.
 	====
 	"""
 
