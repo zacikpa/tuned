@@ -13,17 +13,17 @@ WOL_VALUES = "pumbagsd"
 
 class NetTuningPlugin(hotplug.Plugin):
 	"""
-	Configures network driver, hardware and Netfilter settings.
-	Dynamic change of the interface speed according to the interface
-	utilization is also supported. The dynamic tuning is controlled by
-	the [option]`dynamic` and the global [option]`dynamic_tuning`
+	Configures the network driver, hardware and Netfilter settings.
+	Dynamic change of interface speed according to its utilization
+	is also supported. The dynamic tuning is controlled by
+	the [option]`dynamic` option and the global [option]`dynamic_tuning`
 	option in `tuned-main.conf`.
 
 	`wake_on_lan`:::
-	The [option]`wake_on_lan` option sets wake-on-lan to the specified
+	The [option]`wake_on_lan` option sets Wake-on-Lan to the specified
 	value as when using the `ethtool` utility.
 	+
-	.Set Wake-on-LAN for device eth0 on MagicPacket(TM)
+	.Set the `eth0` device to wake on MagicPacket(TM)
 	====
 	----
 	[net]
@@ -130,11 +130,11 @@ class NetTuningPlugin(hotplug.Plugin):
 	====
 
 	`txqueuelen`:::
-	The [option]`txqueuelen` option allows changing txqueuelen (the length
-	of the transmit queue). It uses `ip` utility that is in package	iproute
-	recommended for TuneD, so the package needs to be installed for its correct
-	functionality. To query the txqueuelen parameters of your network device
-	use `ip link show` and the current value is shown after the qlen column.
+	The [option]`txqueuelen` option allows changing the length
+	of the transmit queue using the `ip` utility.
+	To query the current queue length of your network device,
+	use `ip link show`. The active value is shown after the `qlen` column
+	in the output.
 	+
 	.Adjust the length of the transmit queue
 	====
@@ -145,11 +145,11 @@ class NetTuningPlugin(hotplug.Plugin):
 	====
 
 	`mtu`:::
-	The [option]`mtu` option allows changing MTU (Maximum Transmission Unit).
-	It uses `ip` utility that is in package	iproute recommended for TuneD, so
-	the package needs to be installed for its correct functionality. To query
-	the MTU parameters of your network device use `ip link show` and the
-	current value is shown after the MTU column.
+	The [option]`mtu` option allows changing the MTU
+	(Maximum Transmission Unit) using the `ip` utility.
+	To query the current MTU of your network device,
+	use `ip link show`. The active value is shown after the `mtu` column
+	in the output.
 	+
 	.Adjust the size of the MTU
 	====
