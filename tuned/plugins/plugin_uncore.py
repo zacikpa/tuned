@@ -16,28 +16,31 @@ IS_MAX = 1
 
 class UncorePlugin(hotplug.Plugin):
 	"""
-	An Intel-specific plug-in for limiting the maximum and minimum uncore frequency.
+	An Intel-specific plug-in for limiting the maximum and the minimum
+	uncore frequency.
 
 	The options [option]`max_freq_khz`, [option]`min_freq_khz` correspond to
-	`sysfs` files exposed by Intel uncore frequency driver. Their values can be
-	specified in kHz or as a percentage of their configurable range.
+	sysfs files exposed by the Intel uncore frequency driver. Their values
+	can be specified in kHz or as a percentage of their configurable range.
 
-	.Limiting maximum uncore frequency
+	.Limiting the maximum uncore frequency
 	====
 	----
+	[uncore]
+	max_freq_khz=90%
+
 	[uncore10]
 	type=uncore
 	devices=uncore10
 	max_freq_khz=4000000
-
-	[uncore_all]
-	type=uncore
-	max_freq_khz=90%
 	----
-	Using this options *TuneD* will limit maximum frequency of all uncore units
-	on the Intel system to 90% of the allowable range. Except uncore10 which
-	maximum frequency limit will be set to 4 GHz.
+	Using these options, *TuneD* will limit the maximum frequency of all
+	uncore units except for `uncore10` to 90% of the allowable range.
+	For `uncore10`, the maximum frequency limit will be set to 4 GHz.
 	====
+
+	For more information about the options, see
+	https://www.kernel.org/doc/html/next/admin-guide/pm/intel_uncore_frequency_scaling.html#intel-uncore-frequency-scaling[Intel Uncore Frequency Scaling].
 	"""
 
 	def _init_devices(self):
