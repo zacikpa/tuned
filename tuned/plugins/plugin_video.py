@@ -11,26 +11,25 @@ log = tuned.logs.get()
 class VideoPlugin(base.Plugin):
 	"""
 	Sets various power saving features on video cards.
-	Radeon cards are supported.
-	The powersave level can be specified
-	by using the [option]`radeon_powersave` option. Supported values are:
 
-	* `default`
-	* `auto`
-	* `low`
-	* `mid`
-	* `high`
-	* `dynpm`
-	* `dpm-battery`
-	* `dpm-balanced`
-	* `dpm-perfomance`
+	On Radeon cards, the powersave level can be specified
+	using the [option]`radeon_powersave` option.
+	The supported values for this option are:
 
-	For additional detail, see
-	link:https://www.x.org/wiki/RadeonFeature/#kmspowermanagementoptions[KMS Power Management Options].
+	* `default`,
+	* `auto`,
+	* `low`,
+	* `mid`,
+	* `high`,
+	* `dynpm`,
+	* `dpm-battery`,
+	* `dpm-balanced`,
+	* `dpm-perfomance`.
 
-	NOTE: This plug-in is experimental and the option might change in future releases.
+	For additional details, see
+	https://www.x.org/wiki/RadeonFeature/#kmspowermanagementoptions[KMS Power Management Options].
 
-	.Setting powersave level for the Radeon video card to high
+	.Setting powersave level for a Radeon video card to `high`
 	====
 	----
 	[video]
@@ -40,8 +39,8 @@ class VideoPlugin(base.Plugin):
 
 	Mobile hardware with amdgpu driven eDP panels can be configured
 	with the [option]`panel_power_savings` option.
-	This accepts a value range from 0 to 4, where 4 is the highest power savings
-	but will trade off color accuracy.
+	This accepts a value ranging from 0 to 4, where 4 leads to highest
+	power savings but will trade off color accuracy.
 	"""
 
 	def __init__(self, *args, **kwargs):
