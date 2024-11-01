@@ -136,52 +136,96 @@ class SchedulerUtilsSchedutils(SchedulerUtils):
 
 class SchedulerPlugin(base.Plugin):
 	r"""
-	Allows tuning of scheduling priorities, process/thread/IRQ
+	Allows tuning of scheduling priorities, process/IRQ
 	affinities, and CPU isolation.
 
-	To prevent processes/threads/IRQs from using certain CPUs, use
-	the [option]`isolated_cores` option. It changes process/thread
-	affinities, IRQs affinities and it sets `default_smp_affinity`
-	for IRQs. The CPU affinity mask is adjusted for all processes and
-	threads matching [option]`ps_whitelist` option subject to success
-	of the `sched_setaffinity()` system call. The default setting of
-	the [option]`ps_whitelist` regular expression is `.*` to match all
-	processes and thread names. To exclude certain processes and threads
-	use [option]`ps_blacklist` option. The value of this option is also
-	interpreted as a regular expression and process/thread names (`ps -eo
-	cmd`) are matched against that expression. Profile rollback allows
-	all matching processes and threads to run on all CPUs and restores
-	the IRQ settings prior to the profile application.
+	=== CPU Isolation
 
-	Multiple regular expressions for [option]`ps_whitelist`
-	and [option]`ps_blacklist` options are allowed and separated by
-	`;`. Quoted semicolon `\;` is taken literally.
+	`isolated_cores`:::
+	To prevent processes and IRQs from using certain CPUs, use the
+	[option]`isolated_cores` option, specifying the CPUs in the cpulist format.
+	The option changes process affinities and IRQs affinities, moving them
+	away from the given CPUs. It also sets the default CPU affinity for
+	non-active IRQs. Rolling back a TuneD profile restores the original
+	affinities active prior to its application.
 
-	.Isolate CPUs 2-4
+	`ps_whitelist`, `ps_blacklist`:::
+	The CPU affinity mask is adjusted with the [option]`isolated_cores` option
+	for all processes whose names match any of the regular expressions specified
+	in [option]`ps_whitelist`. The default value of the [option]`ps_whitelist`
+	option is `.*`, matching all thread names.
+	+
+	To exclude certain processes, use the complementary
+	[option]`ps_blacklist` option. The value of this option is also
+	interpreted as a regular expression and process names (`ps -eo
+	cmd`) are matched against that expression.
+	+
+	Multiple regular expressions for the [option]`ps_whitelist` and the
+	[option]`ps_blacklist` options are allowed and must be separated by
+	`;`. A quoted semicolon `\;` is taken literally.
+	+
+	The affinity tuning is subject to success of the `sched_setaffinity` system
+	call. If the affinity of a particular process cannot be changed, TuneD may
+	report warnings or errors if such behavior is not expected for the process.
+
+	.Isolating selected CPUs
 	====
 	----
 	[scheduler]
 	isolated_cores=2-4
 	ps_blacklist=.*pmd.*;.*PMD.*;^DPDK;.*qemu-kvm.*
 	----
-	Isolate CPUs 2-4 while ignoring processes and threads matching
-	`ps_blacklist` regular expressions.
+	Isolates CPUs 2-4 while ignoring processes and threads matching the regular
+	expressions in [option]`ps_blacklist`.
 	====
 
+	`cgroup_ps_blacklist`:::
+	The option [option]`cgroup_ps_blacklist` allows excluding processes
+	which belong to specific cgroups. The regular expression specified
+	by this option is matched against cgroup hierarchies from
+	`/proc/_PID_/cgroups`. Cgroups v1 hierarchies from `/proc/_PID_/cgroups`
+	are separated by `,` prior to regular expression matching. The
+	following is an example of content against which the regular expression
+	is matched against: `10:hugetlb:/,9:perf_event:/,8:blkio:/`
+	+
+	Multiple regular expressions can be specified, separated by `;`.
+	The semicolon represents a logical 'or' operator.
+
+	.Cgroup-based exclusion of processes from CPU isolation
+	====
+	----
+	[scheduler]
+	isolated_cores=1
+	cgroup_ps_blacklist=:/daemons\b
+	----
+	The scheduler plug-in will move all processes away from CPU1 except for
+	processes which belong to the cgroup `/daemons`. The `\b` is a regular
+	expression metacharacter that matches a word boundary.
+	----
+	[scheduler]
+	isolated_cores=1
+	cgroup_ps_blacklist=\b8:blkio:
+	----
+	The scheduler plug-in will exclude all processes which belong to a cgroup
+	with hierarchy-ID `8` and controller-list `blkio`.
+	====
+
+	`irq_process`:::
 	The [option]`irq_process` option controls whether the scheduler plugin
 	applies the `isolated_cores` parameter to IRQ affinities. The default
 	value is `true`, which means that the scheduler plugin will move all
 	possible IRQs away from the isolated cores. When `irq_process` is set
 	to `false`, the plugin will not change any IRQ affinities.
 
+	`default_irq_smp_affinity`:::
 	The [option]`default_irq_smp_affinity` option controls the values
 	*TuneD* writes to `/proc/irq/default_smp_affinity`. The file specifies
-	default affinity mask that applies to all non-active IRQs. Once an
-	IRQ is allocated/activated its affinity bitmask will be set to the
+	the default affinity mask that applies to all non-active IRQs. Once an
+	IRQ is allocated/activated, its affinity bitmask will be set to this
 	default mask.
-
-	The following values are supported:
-
+	+
+	The following values are supported for the option:
+	--
 	* `calc`
 	+
 	The content of `/proc/irq/default_smp_affinity` will be calculated
@@ -192,28 +236,32 @@ class SchedulerPlugin(base.Plugin):
 	`/proc/irq/default_smp_affinity`. If the intersection is
 	an empty set, then just the non-isolated cores are written to
 	`/proc/irq/default_smp_affinity`. This behavior is the default if
-	the parameter `default_irq_smp_affinity` is omitted.
-
+	the option is omitted.
+	+
 	* `ignore`
 	+
 	*TuneD* will not touch `/proc/irq/default_smp_affinity`.
-
-	* an explicit cpulist
 	+
-	The cpulist (such as `1,3-4`) is unpacked and written directly to
+	* an explicit cpulist, such as `1,3-4`
+	+
+	The cpulist is unpacked and written directly to
 	`/proc/irq/default_smp_affinity`.
+	--
 
-	.An explicit CPU list to set the default IRQ smp affinity to CPUs 0 and 2
+	.Explictly setting CPU affinity for non-active IRQs
 	====
 	----
 	[scheduler]
 	isolated_cores=1,3
 	default_irq_smp_affinity=0,2
 	----
+	Once a non-active IRQ is allocated, it will be affined
+	to CPUs 0 and 2.
 	====
 
+	=== Scheduling policies and priorities
 	To adjust scheduling policy, priority and affinity for a group of
-	processes/threads, use the following syntax.
+	processes, use the following syntax.
 
 	[subs="+quotes,+macros"]
 	----
@@ -222,10 +270,10 @@ class SchedulerPlugin(base.Plugin):
 
 	Here, `__rule_prio__` defines internal *TuneD* priority of the
 	rule. Rules are sorted based on priority. This is needed for
-	inheritence to be able to reorder previously defined rules. Equal
+	inheritance to be able to reorder previously defined rules. Equal
 	`__rule_prio__` rules should be processed in the order they were
-	defined. However, this is Python interpreter dependant. To disable
-	an inherited rule for `__groupname__` use:
+	defined. However, this is Python interpreter dependent. To disable
+	an inherited rule for `__groupname__`, use:
 
 	[subs="+quotes,+macros"]
 	----
@@ -237,7 +285,7 @@ class SchedulerPlugin(base.Plugin):
 	*`b`* for batch,
 	*`r`* for round robin,
 	*`o`* for other,
-	*`*`* do not change.
+	*`*`* for no change.
 
 	`__affinity__` is CPU affinity in hexadecimal. Use `*` for no change.
 
@@ -263,24 +311,38 @@ class SchedulerPlugin(base.Plugin):
 	----
 	====
 
-	The scheduler plug-in uses perf event loop to catch newly created
-	processes. By default it listens to `perf.RECORD_COMM` and
-	`perf.RECORD_EXIT` events. By setting [option]`perf_process_fork`
-	option to `true`, `perf.RECORD_FORK` events will be also listened
-	to. In other words, child processes created by the `fork()` system
+	=== Dynamic tuning
+
+	`perf_process_fork`:::
+	The scheduler plug-in uses a perf event loop to catch newly created
+	processes. By default it listens to `PERF_RECORD_COMM` and
+	`PERF_RECORD_EXIT` events. By setting the [option]`perf_process_fork`
+	option to `true`, `PERF_RECORD_FORK` events will also be listened
+	to. In other words, child processes created by the `fork` system
 	call will be processed. Since child processes inherit CPU affinity
 	from their parents, the scheduler plug-in usually does not need to
 	explicitly process these events. As processing perf events can
 	pose a significant CPU overhead, the [option]`perf_process_fork`
-	option parameter is set to `false` by default. Due to this, child
-	processes are not processed by the scheduler plug-in.
+	option parameter is set to `false` by default.
 
+	`runtime`:::
 	The CPU overhead of the scheduler plugin can be mitigated by using
 	the scheduler [option]`runtime` option and setting it to `0`. This
 	will completely disable the dynamic scheduler functionality and the
 	perf events will not be monitored and acted upon. The disadvantage
 	ot this approach is the procees/thread tuning will be done only at
 	profile application.
+
+	`perf_mmap_pages`:::
+	For perf events, a memory-mapped buffer is used. Under heavy load,
+	the buffer may overflow. In such cases, the `scheduler` plug-in
+	may start missing events and failing to process some newly created
+	processes. Increasing the buffer size may help. The buffer size can
+	be set with the [option]`perf_mmap_pages` option. The value of this
+	parameter has to be expressed in powers of 2. If it is not the power
+	of 2, the nearest higher power of 2 value is calculated from it
+	and this calculated value is used. If the [option]`perf_mmap_pages`
+	option is omitted, the default kernel value is used.
 
 	.Disabling the scheduler dynamic functionality
 	====
@@ -291,57 +353,56 @@ class SchedulerPlugin(base.Plugin):
 	----
 	====
 
-	NOTE: For perf events, memory mapped buffer is used. Under heavy load
-	the buffer may overflow. In such cases the `scheduler` plug-in
-	may start missing events and failing to process some newly created
-	processes. Increasing the buffer size may help. The buffer size can
-	be set with the [option]`perf_mmap_pages` option. The value of this
-	parameter has to expressed in powers of 2. If it is not the power
-	of 2, the nearest higher power of 2 value is calculated from it
-	and this calculated value used. If the [option]`perf_mmap_pages`
-	option is omitted, the default kernel value is used.
+	=== Process confinement via cgroups
 
-	The scheduler plug-in supports process/thread confinement using
+	The scheduler plug-in supports process confinement using
 	cgroups v1.
 
-	[option]`cgroup_mount_point` option specifies the path to mount the
-	cgroup filesystem or where *TuneD* expects it to be mounted. If unset,
-	`/sys/fs/cgroup/cpuset` is expected.
+	`cgroup_mount_point`:::
+	The [option]`cgroup_mount_point` option specifies the path to mount
+	the cgroup filesystem or where *TuneD* expects it to be mounted.
+	The default value is `/sys/fs/cgroup/cpuset`.
 
-	If [option]`cgroup_groups_init` option is set to `1` *TuneD*
-	will create (and remove) all cgroups defined with the `cgroup*`
-	options. This is the default behavior. If it is set to `0` the
+	`cgroup_groups_init`:::
+	If the [option]`cgroup_groups_init` option is set to `1`, *TuneD*
+	will create all cgroups defined with the `cgroup*` options.
+	They will also be removed when the profile is unset.
+	This is the default behavior. If the option is set to `0`, the
 	cgroups need to be preset by other means.
 
+	`cgroup_mount_point_init`:::
 	If [option]`cgroup_mount_point_init` option is set to `1`,
 	*TuneD* will create (and remove) the cgroup mountpoint. It implies
 	`cgroup_groups_init = 1`. If set to `0` the cgroups mount point
 	needs to be preset by other means. This is the default behavior.
 
+	`cgroup_for_isolated_cores`:::
 	The [option]`cgroup_for_isolated_cores` option is the cgroup
 	name used for the [option]`isolated_cores` option functionality. For
 	example, if a system has 4 CPUs, `isolated_cores=1` means that all
-	processes/threads will be moved to CPUs 0,2-3.
+	processes will be moved to CPUs 0,2-3.
+	+
 	The scheduler plug-in will isolate the specified core by writing
 	the calculated CPU affinity to the `cpuset.cpus` control file of
-	the specified cgroup and move all the matching processes/threads to
+	the specified cgroup and move all the matching processes to
 	this group. If this option is unset, classic cpuset affinity using
-	`sched_setaffinity()` will be used.
+	`sched_setaffinity` will be used.
 
-	[option]`cgroup.__cgroup_name__` option defines affinities for
-	arbitrary cgroups. Even hierarchic cgroups can be used, but the
-	hieararchy needs to be specified in the correct order. Also *TuneD*
+	`cgroup.__cgroup_name__`:::
+	The [option]`cgroup.__cgroup_name__` option defines CPU affinity for
+	an arbitrary cgroup. Even hierarchic cgroups can be used, but the
+	hieararchy needs to be specified in the correct order. Also, *TuneD*
 	does not do any sanity checks here, with the exception that it forces
 	the cgroup to be under [option]`cgroup_mount_point`.
-
+	+
 	The syntax of the scheduler option starting with `group.` has been
 	augmented to use `cgroup.__cgroup_name__` instead of the hexadecimal
 	`__affinity__`. The matching processes will be moved to the cgroup
 	`__cgroup_name__`. It is also possible to use cgroups which have
 	not been defined by the [option]`cgroup.` option as described above,
 	i.e. cgroups not managed by *TuneD*.
-
-	All cgroup names are sanitized by replacing all all dots (`.`) with
+	+
+	All cgroup names are sanitized by replacing all dots (`.`) with
 	slashes (`/`). This is to prevent the plug-in from writing outside
 	[option]`cgroup_mount_point`.
 
@@ -362,56 +423,32 @@ class SchedulerPlugin(base.Plugin):
 	----
 	Cgroup `group1` has the affinity set to CPU 2 and the cgroup `group2`
 	to CPUs 0,2. Given a 4 CPU setup, the [option]`isolated_cores=1`
-	option causes all processes/threads to be moved to CPU
-	cores 0,2-3. Processes/threads that are blacklisted by the
-	[option]`ps_blacklist` regular expression will not be moved.
+	option causes all processes to be moved to CPU cores 0,2-3.
+	Processes that are blacklisted by the [option]`ps_blacklist`
+	regular expression will not be moved.
 	
 	The scheduler plug-in will isolate the specified core by writing the
 	CPU affinity 0,2-3 to the `cpuset.cpus` control file of the `group`
-	and move all the matching processes/threads to this cgroup.
+	and move all the matching processes to this cgroup.
 	====
 
-	Option [option]`cgroup_ps_blacklist` allows excluding processes
-	which belong to the blacklisted cgroups. The regular expression specified
-	by this option is matched against cgroup hierarchies from
-	`/proc/PID/cgroups`. Cgroups v1 hierarchies from `/proc/PID/cgroups`
-	are separated by commas ',' prior to regular expression matching. The
-	following is an example of content against which the regular expression
-	is matched against: `10:hugetlb:/,9:perf_event:/,8:blkio:/`
-
-	Multiple regular expressions can be separated by semicolon ';'. The
-	semicolon represents a logical 'or' operator.
-
-	.Cgroup-based exclusion of processes from the scheduler
-	====
-	----
-	[scheduler]
-	isolated_cores=1
-	cgroup_ps_blacklist=:/daemons\b
-	----
-	The scheduler plug-in will move all processes away from core 1 except processes which
-	belong to cgroup '/daemons'. The '\b' is a regular expression
-	metacharacter that matches a word boundary.
-	----
-	[scheduler]
-	isolated_cores=1
-	cgroup_ps_blacklist=\b8:blkio:
-	----
-	The scheduler plug-in will exclude all processes which belong to a cgroup
-	with hierarchy-ID 8 and controller-list blkio.
-	====
-
+	=== Scheduler-related kernel run-time parameters
 	Recent kernels moved some `sched_` and `numa_balancing_` kernel run-time
 	parameters from `/proc/sys/kernel`, managed by the `sysctl` utility, to
 	`debugfs`, typically mounted under `/sys/kernel/debug`.  TuneD provides an
 	abstraction mechanism for the following parameters via the scheduler plug-in:
-	[option]`sched_min_granularity_ns`, [option]`sched_latency_ns`,
-	[option]`sched_wakeup_granularity_ns`, [option]`sched_tunable_scaling`,
-	[option]`sched_migration_cost_ns`, [option]`sched_nr_migrate`,
-	[option]`numa_balancing_scan_delay_ms`,
-	[option]`numa_balancing_scan_period_min_ms`,
-	[option]`numa_balancing_scan_period_max_ms` and
-	[option]`numa_balancing_scan_size_mb`.
+
+	* [option]`sched_min_granularity_ns`,
+	* [option]`sched_latency_ns`,
+	* [option]`sched_wakeup_granularity_ns`,
+	* [option]`sched_tunable_scaling`,
+	* [option]`sched_migration_cost_ns`,
+	* [option]`sched_nr_migrate`,
+	* [option]`numa_balancing_scan_delay_ms`,
+	* [option]`numa_balancing_scan_period_min_ms`,
+	* [option]`numa_balancing_scan_period_max_ms`,
+	* [option]`numa_balancing_scan_size_mb`.
+
 	Based on the kernel used, TuneD will write the specified value to the correct
 	location.
 
@@ -426,8 +463,9 @@ class SchedulerPlugin(base.Plugin):
 	[sysctl]
 	kernel.sched_migration_cost_ns=500000
 	----
-	that is, value `500000` will be written to `/proc/sys/kernel/sched_migration_cost_ns`.
-	However, on more recent kernels, the value `500000` will be written to
+	That is, the value `500000` will be written to
+	`/proc/sys/kernel/sched_migration_cost_ns`.
+	On more recent kernels, the value `500000` will be written to
 	`/sys/kernel/debug/sched/migration_cost_ns`.
 	====
 	"""
