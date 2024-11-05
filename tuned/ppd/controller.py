@@ -3,6 +3,8 @@ from tuned.utils.commands import commands
 from tuned.consts import PPD_CONFIG_FILE
 from tuned.ppd.config import PPDConfig, PPD_PERFORMANCE, PPD_POWER_SAVER
 from enum import StrEnum
+from watchdog.events import FileSystemEventHandler
+from watchdog.observers import Observer
 import threading
 import dbus
 import os
@@ -17,6 +19,17 @@ UNKNOWN_PROFILE = "unknown"
 UPOWER_DBUS_NAME = "org.freedesktop.UPower"
 UPOWER_DBUS_PATH = "/org/freedesktop/UPower"
 UPOWER_DBUS_INTERFACE = "org.freedesktop.UPower"
+
+class PerformanceDegradedHandler(FileSystemEventHandler):
+    def __init__(self, check_performance_degraded):
+        self._check_performance_degraded = check_performance_degraded
+
+    def on_modified(self, event):
+        if event.is_directory:
+            return
+        log.debug("File changed: %s" % event.src_path)
+        self._check_performance_degraded()
+
 
 class PerformanceDegraded(StrEnum):
     NONE = ""
@@ -103,6 +116,7 @@ class Controller(exports.interfaces.ExportableInterface):
         self._tuned_interface = tuned_interface
         self._cmd = commands()
         self._terminate = threading.Event()
+        self._performance_degraded_handler = PerformanceDegradedHandler(self.check_performance_degraded)
         self.initialize()
 
     def upower_changed(self, interface, changed, invalidated):
@@ -121,11 +135,11 @@ class Controller(exports.interfaces.ExportableInterface):
         except dbus.exceptions.DBusException as error:
             log.debug(error)
 
-    def _check_performance_degraded(self):
+    def check_performance_degraded(self):
         performance_degraded = PerformanceDegraded.NONE
-        if os.path.exists(NO_TURBO_PATH) and self._cmd.read_file(NO_TURBO_PATH).strip() == "1":
+        if self._has_no_turbo and self._cmd.read_file(NO_TURBO_PATH).strip() == "1":
             performance_degraded = PerformanceDegraded.HIGH_OPERATING_TEMPERATURE
-        if os.path.exists(LAP_MODE_PATH) and self._cmd.read_file(LAP_MODE_PATH).strip() == "1":
+        if self._has_lap_mode and self._cmd.read_file(LAP_MODE_PATH).strip() == "1":
             performance_degraded = PerformanceDegraded.LAP_DETECTED
         if performance_degraded != self._performance_degraded:
             log.info("Performance degraded: %s" % performance_degraded)
@@ -134,7 +148,10 @@ class Controller(exports.interfaces.ExportableInterface):
 
     def initialize(self):
         self._profile_holds = ProfileHoldManager(self)
+        self._has_no_turbo = os.path.exists(NO_TURBO_PATH)
+        self._has_lap_mode = os.path.exists(LAP_MODE_PATH)
         self._performance_degraded = PerformanceDegraded.NONE
+        self.check_performance_degraded()
         self._config = PPDConfig(PPD_CONFIG_FILE)
         active_profile = self.active_profile()
         self._base_profile = active_profile if active_profile != UNKNOWN_PROFILE else self._config.default_profile
@@ -145,8 +162,14 @@ class Controller(exports.interfaces.ExportableInterface):
 
     def run(self):
         exports.start()
-        while not self._cmd.wait(self._terminate, 1):
-            self._check_performance_degraded()
+        observer = Observer()
+        if self._has_lap_mode:
+            observer.schedule(self._performance_degraded_handler, LAP_MODE_PATH)
+        if self._has_no_turbo:
+            observer.schedule(self._performance_degraded_handler, NO_TURBO_PATH)
+        observer.start()
+        self._terminate.wait()
+        observer.stop()
         exports.stop()
 
     @property

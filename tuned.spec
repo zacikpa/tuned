@@ -69,6 +69,7 @@ BuildRequires: %{_py}-mock
 BuildRequires: %{_py}-pyudev
 Requires: %{_py}-pyudev
 Requires: %{_py}-linux-procfs, %{_py}-perf
+Requires: %{_py}-watchdog
 %if %{without python3}
 Requires: %{_py}-schedutils
 %endif
