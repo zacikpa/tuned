@@ -1,8 +1,12 @@
 from tuned import exports, logs
 from tuned.utils.commands import commands
 from tuned.consts import PPD_CONFIG_FILE, PPD_BASE_PROFILE_FILE, PPD_API_COMPATIBILITY
-from tuned.ppd.config import PPDConfig, PPD_PERFORMANCE, PPD_POWER_SAVER
+from tuned.ppd.config import PPDConfig, PPD_PERFORMANCE, PPD_BALANCED, PPD_POWER_SAVER
+
 from enum import StrEnum
+from watchdog.events import FileSystemEventHandler
+from watchdog.observers import Observer
+import time
 import threading
 import dbus
 import os
@@ -18,6 +22,15 @@ UPOWER_DBUS_NAME = "org.freedesktop.UPower"
 UPOWER_DBUS_PATH = "/org/freedesktop/UPower"
 UPOWER_DBUS_INTERFACE = "org.freedesktop.UPower"
 
+PLATFORM_PROFILE_PATH = "/sys/firmware/acpi/platform_profile"
+PLATFORM_PROFILE_MAPPING = {
+    "low-power": PPD_POWER_SAVER,
+    "balanced": PPD_BALANCED,
+    "performance": PPD_PERFORMANCE
+}
+
+CLOSE_MODIFY_BUFFER = 0.1
+
 class PerformanceDegraded(StrEnum):
     """
     Possible reasons for performance degradation.
@@ -25,6 +38,48 @@ class PerformanceDegraded(StrEnum):
     NONE = ""
     LAP_DETECTED = "lap-detected"
     HIGH_OPERATING_TEMPERATURE = "high-operating-temperature"
+
+
+class EventHandlerWithController(FileSystemEventHandler):
+    def __init__(self, controller):
+        super(EventHandlerWithController, self).__init__()
+        self._controller = controller
+
+
+class PerformanceDegradedEventHandler(EventHandlerWithController):
+    def on_modified(self, event):
+        if event.is_directory:
+            return
+        self._controller.check_performance_degraded()
+
+
+class PlatformProfileEventHandler(EventHandlerWithController):
+    def __init__(self, controller):
+        super(PlatformProfileEventHandler, self).__init__(controller)
+        self._platform_profile_file_open = False
+        self._last_close = 0
+
+    def on_opened(self, event):
+        if event.is_directory:
+            return
+        self._platform_profile_file_open = True
+        self._last_close = 0
+
+    def on_closed(self, event):
+        if event.is_directory:
+            return
+        self._platform_profile_file_open = False
+        self._last_close = time.time()
+
+    def on_closed_no_write(self, event):
+        if event.is_directory:
+            return
+        self._platform_profile_file_open = False
+
+    def on_modified(self, event):
+        if event.is_directory or self._platform_profile_file_open or self._last_close + CLOSE_MODIFY_BUFFER > time.time():
+            return
+        self._controller.check_platform_profile()
 
 
 class ProfileHold(object):
@@ -147,6 +202,11 @@ class Controller(exports.interfaces.ExportableInterface):
         self._tuned_interface = tuned_interface
         self._cmd = commands()
         self._terminate = threading.Event()
+        self._observer = None
+        self._watches = {}
+        self._platform_profile_supported = os.path.isfile(PLATFORM_PROFILE_PATH)
+        self._no_turbo_supported = os.path.isfile(NO_TURBO_PATH)
+        self._lap_mode_supported = os.path.isfile(LAP_MODE_PATH)
         self.initialize()
 
     def upower_changed(self, interface, changed, invalidated):
@@ -170,19 +230,29 @@ class Controller(exports.interfaces.ExportableInterface):
         except dbus.exceptions.DBusException as error:
             log.debug(error)
 
-    def _check_performance_degraded(self):
+    def check_performance_degraded(self):
         """
         Checks the current performance degradation status and sends a signal if it changed.
         """
         performance_degraded = PerformanceDegraded.NONE
-        if os.path.exists(NO_TURBO_PATH) and self._cmd.read_file(NO_TURBO_PATH).strip() == "1":
+        if self._no_turbo_supported and self._cmd.read_file(NO_TURBO_PATH).strip() == "1":
             performance_degraded = PerformanceDegraded.HIGH_OPERATING_TEMPERATURE
-        if os.path.exists(LAP_MODE_PATH) and self._cmd.read_file(LAP_MODE_PATH).strip() == "1":
+        if self._lap_mode_supported and self._cmd.read_file(LAP_MODE_PATH).strip() == "1":
             performance_degraded = PerformanceDegraded.LAP_DETECTED
         if performance_degraded != self._performance_degraded:
             log.info("Performance degraded: %s" % performance_degraded)
             self._performance_degraded = performance_degraded
             exports.property_changed("PerformanceDegraded", performance_degraded)
+
+    def check_platform_profile(self):
+        """
+        Sets the active PPD profile based on the content of the ACPI platform profile.
+        """
+        platform_profile = self._cmd.read_file(PLATFORM_PROFILE_PATH).strip()
+        log.info(f"Read platform profile: {platform_profile}")
+        if platform_profile not in PLATFORM_PROFILE_MAPPING:
+            return
+        self.set_active_profile(PLATFORM_PROFILE_MAPPING[platform_profile])
 
     def _load_base_profile(self):
         """
@@ -216,6 +286,7 @@ class Controller(exports.interfaces.ExportableInterface):
         self._active_profile = None
         self._profile_holds = ProfileHoldManager(self)
         self._performance_degraded = PerformanceDegraded.NONE
+        self.check_performance_degraded()
         self._on_battery = False
         self._config = PPDConfig(PPD_CONFIG_FILE, self._tuned_interface)
         self._base_profile = self._load_base_profile() or self._config.default_profile
@@ -229,8 +300,20 @@ class Controller(exports.interfaces.ExportableInterface):
         Exports the DBus interface and runs the main daemon loop.
         """
         exports.start()
+        self._observer = Observer()
+        if self._no_turbo_supported:
+            self._watches[NO_TURBO_PATH] = self._observer.schedule(PerformanceDegradedEventHandler(self), NO_TURBO_PATH)
+        if self._lap_mode_supported:
+            self._watches[LAP_MODE_PATH] = self._observer.schedule(PerformanceDegradedEventHandler(self), LAP_MODE_PATH)
+        if self._platform_profile_supported:
+            self._watches[PLATFORM_PROFILE_PATH] = self._observer.schedule(PlatformProfileEventHandler(self), PLATFORM_PROFILE_PATH)
+        if self._watches:
+            self._observer.start()
         while not self._cmd.wait(self._terminate, 1):
-            self._check_performance_degraded()
+            pass
+        if self._watches:
+            self._observer.stop()
+            self._observer.join()
         exports.stop()
 
     @property
