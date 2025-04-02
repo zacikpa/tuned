@@ -1,4 +1,5 @@
 import tuned.logs
+import importlib
 import os
 
 __all__ = ["ClassLoader"]
@@ -48,10 +49,9 @@ class ClassLoader(object):
 		raise ImportError("Cannot find the class %s." % module_name)
 
 	def load_all_classes(self):
-		package = __import__(self._namespace)
-		basename = self._namespace.split(".")[-1]
+		namespace = importlib.import_module(self._namespace)
 		classes = []
-		for module_name in os.listdir(getattr(package, basename).__path__[0]):
+		for module_name in os.listdir(namespace.__path__[0]):
 			try:
 				module_name = os.path.splitext(module_name)[0]
 				if not module_name.startswith(self._prefix):
