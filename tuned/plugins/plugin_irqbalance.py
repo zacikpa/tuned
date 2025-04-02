@@ -3,7 +3,10 @@ from .decorators import command_custom
 from tuned import consts
 import tuned.logs
 import errno
-import perf
+try:
+	import perf
+except:
+	pass
 import re
 
 log = tuned.logs.get()
