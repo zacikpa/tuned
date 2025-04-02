@@ -1,0 +1,61 @@
+name: Deploy TuneD website to Pages
+
+on:
+  push:
+    branches:
+      - gh-pages
+      - master
+
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout gh-pages branch
+        uses: actions/checkout@v4
+        with:
+          ref: gh-pages
+      - name: Fetch manual and related scripts
+        run: |
+          git fetch origin master --depth 1
+          git checkout origin/master --no-overlay -- doc/manual/ compile_plugin_docs.py tuned/
+      - name: Install dependencies
+        run: |
+          sudo apt install -y \
+            make \
+            asciidoctor \
+            python3-pyudev \
+            python3-linux-procfs \
+      - name: Build the manual
+        run: cd doc/manual && make
+      - name: Prepare the website contents
+        run: |
+          mkdir _site
+          cp doc/manual/index.html _site/docs.html
+          cp -r art docs fonts CNAME header1.png index.html Logo-Red_Hat.png style.css _site/
+      - name: Setup Pages
+        id: pages
+        uses: actions/configure-pages@v5
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
